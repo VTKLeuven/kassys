@@ -86,3 +86,11 @@
 .table-centered td {
     vertical-align: middle;
 }
+
+.wider .control-label {
+    width: 250px;
+}
+
+.wider .controls {
+    padding-left: 90px;
+}
