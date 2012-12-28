@@ -94,3 +94,7 @@
 .wider .controls {
     padding-left: 90px;
 }
+
+.force-height {
+    min-height: 300px;
+}

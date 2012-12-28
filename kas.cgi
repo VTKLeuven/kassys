@@ -1810,8 +1810,8 @@ sub output_header {
   print "</div>\n";
   print "</div>\n";
   print "</div>\n";
-  print "<div class='container-fluid'>\n";
-  print "<div class='row-fluid'>\n";
+  print "<div class='container'>\n";
+  print "<div class='row-fluid force-height'>\n";
   print "<div class='span2'>\n";
   print "<div class='well sidebar-nav span2'>\n";
   print "<ul class='nav nav-list'>\n";
