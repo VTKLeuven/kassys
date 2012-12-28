@@ -76,6 +76,14 @@
         width: 100%;
         *width: 99.94680851063829%;
     }
+
+    .wider .control-label {
+        width: 250px;
+    }
+
+    .wider .controls {
+        padding-left: 90px;
+    }
 }
 
 .row-fluid .span8 {
@@ -85,14 +93,6 @@
 
 .table-centered td {
     vertical-align: middle;
-}
-
-.wider .control-label {
-    width: 250px;
-}
-
-.wider .controls {
-    padding-left: 90px;
 }
 
 .force-height {
