@@ -1264,8 +1264,8 @@ sub show_form_add_pay {
   print "<label class='control-label' for='inputAmount'>paid me</label>\n";
   print "<div class='controls'>\n";
   print "<div class='input-prepend'>\n";
-  print "<input type='text' id='inputAmount' placeholder='0.00' name='ap_value'>\n";
   print "<span class='add-on'>&euro;</span>\n";
+  print "<input type='text' id='inputAmount' placeholder='0.00' name='ap_value'>\n";
   print "</div>\n";
   print "</div>\n";
   print "</div>\n";
@@ -1315,8 +1315,8 @@ sub show_form_add_item {
   print "<label class='control-label' for='inputItemPrice'>I paid</label>\n";
   print "<div class='controls'>\n";
   print "<div class='input-prepend'>\n";
-  print "<input type='text' name='aw_value' id='inputItemPrice' placeholder='0.00'>\n";
   print "<span class='add-on'>&euro;</span>\n";
+  print "<input type='text' name='aw_value' id='inputItemPrice' placeholder='0.00'>\n";
   print "</div>\n";
   print "</div>\n";
   print "</div>\n";
@@ -1530,8 +1530,8 @@ sub show_change_settings {
   print "<label class='control-label' for='autoaccept'>By default, deny charges above</label>\n";
   print "<div class='controls'>\n";
   print "<div class='input-prepend'>\n";
-  print "<input type='text' id='autoaccept' name='cp_autoaccept' value='".htmlwrap($autoaccept)."'>\n";
   print "<span class='add-on'>&euro;</span>\n";
+  print "<input type='text' id='autoaccept' name='cp_autoaccept' value='".htmlwrap($autoaccept)."'>\n";
   print "</div>\n";
   print "</div>\n";
   print "</div>\n";
@@ -2491,8 +2491,8 @@ while(1) {
       print "<label class='control-label' for='inputItemPrice'>Amount</label>\n";
       print "<div class='controls'>\n";
       print "<div class='input-prepend'>\n";
-      print "<input type='text' id='inputItemPrice' name='ep_value' value='".(-$amount)."'>\n";
       print "<span class='add-on'>&euro;</span>\n";
+      print "<input type='text' id='inputItemPrice' name='ep_value' value='".(-$amount)."'>\n";
       print "</div>\n";
       print "</div>\n";
       print "</div>\n";
@@ -2508,8 +2508,8 @@ while(1) {
       print "<label class='control-label'>Amount</label>\n";
       print "<div class='controls'>\n";
       print "<div class='input-prepend'>\n";
-      print "<span class='input uneditable-input'>".(-$amount)."</span>\n";
       print "<span class='add-on'>&euro;</span>\n";
+      print "<span class='input uneditable-input'>".(-$amount)."</span>\n";
       print "</div>\n";
       print "</div>\n";
       print "</div>\n";
@@ -2579,12 +2579,12 @@ while(1) {
     print "<label class='control-label'>Amount</label>\n";
     print "<div class='controls'>\n";
     print "<div class='input-prepend'>\n";
+    print "<span class='add-on'>&euro;</span>\n";
     if ($wanter eq $auth_uid) {
       print "<input type='text' name='ew_value' value='$amount'>\n";
     } else {
       print "<span class='input uneditable-input'>$amount</span>\n";
     }
-    print "<span class='add-on'>&euro;</span>\n";
     print "</div>\n";
     print "</div>\n";
     print "</div>\n";
