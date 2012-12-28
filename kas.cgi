@@ -2728,7 +2728,6 @@ while(1) {
     print "<form class='form-horizontal form-horizontal-super-condensed' action='$URL' method='post'>\n";
     print "<fieldset>\n";
     print "<legend>Edit visible people</legend>\n";
-    print "<input type='hidden' name='cmd' value='doev'>\n";
     my %au;
     for (sort {
       my $x=(defined($a->{VIS}) ? 0 : 1) <=> (defined($b->{VIS}) ? 0 : 1);
@@ -2745,6 +2744,7 @@ while(1) {
         $au{$_->{UID}}=1;
       }
     }
+    print "<input type='hidden' name='cmd' value='doev'>\n";
     print "<input type='hidden' name='ev_uids' value='".join(',',sort keys %au)."'>\n";
     print "<div class='control-group'><div class='controls' style='padding-left: 90px;'><input type='submit' class='btn' value='Submit'></div></div>\n";
     output_footer;
