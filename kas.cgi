@@ -1813,7 +1813,7 @@ sub output_header {
   print "<div class='container'>\n";
   print "<div class='row-fluid force-height'>\n";
   print "<div class='span2'>\n";
-  print "<div class='well sidebar-nav span2'>\n";
+  print "<div class='well sidebar-nav'>\n";
   print "<ul class='nav nav-list'>\n";
   print "<li class='nav-header'>Menu</li>\n";
   print "<li ".($path[0] eq 'overview' ? 'class="active"' : '')."><a accesskey=\"o\" href=\"$URL\">Overview</a></li>\n" if (defined $auth_username);
