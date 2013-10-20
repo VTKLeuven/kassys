@@ -1,12 +1,35 @@
+# database server hostname
 dbhost localhost
-dbuser <username>
+
+# username for database
+dbuser kas
+
+# database name
 dbname kas
-dbpass <password>
-dbprefix 
+
+# database password
+dbpass 
+
+# prefix to use in database (optional)
+#dbprefix kas
+
+# title to use
 title VTKas
+
+# title to use in html
 htmltitle VTKas
+
+# allow resetting of database (using 'reset') - comment out as soon as database created
 initdb false
+
+# mails will be sent from
 mailfrom beheer@vtk.be
+
+# mails will be sent to
 mailto beheer@vtk.be
-beheer <uid>
+
+# the user id of the beheer account
+beheer
+
+# the name of the beheer account
 beheername beheer
