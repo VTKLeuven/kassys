@@ -66,10 +66,16 @@ my $auth_username;
 my $auth_methods="";
 my $auth_active=0;
 my $auth_autoaccept=0;
+my $auth_isadmin=0;
 my $session=cookie('session');
 
 # mails should be sent from this e-mail adres
 my $mailfrom;
+my $mailto;
+
+# The 'beheer' account id.
+my $beheer;
+my $beheer_name;
 
 # cached database information
 my %USERS; my $haveUSERS=0; my %FUSERS;
@@ -304,6 +310,9 @@ sub connect_db {
   $title=$CONF{title} || $VERSION;
   $htmltitle=$CONF{htmltitle} || $title;
   $mailfrom=$CONF{mailfrom};
+  $mailto=$CONF{mailto};
+  $beheer=$CONF{beheer};
+  $beheer_name=$CONF{beheername};
 }
 
 sub reset_db {
@@ -348,6 +357,7 @@ sub reset_db {
              "I18N VARCHAR(3) NOT NULL DEFAULT 'en', ". # language
              "AUTOACCEPT NUMERIC(12,4) NOT NULL DEFAULT 50, ". # automatically accept charges up to this amount
              "NICKNAME VARCHAR(40) NULL DEFAULT NULL, ". # nickname
+             "ADMIN BOOLEAN NOT NULL DEFAULT FALSE, ". #admin
              "UNIQUE (UNAME), ".
              "UNIQUE (EMAIL)".
            ") WITHOUT OIDS");
@@ -496,9 +506,9 @@ sub check_auth {
     my $sth2=$dbh->prepare("DELETE FROM ${prefix}SESSION WHERE EXPIRE<CURRENT_TIMESTAMP");
     $sth2->execute;
     $dbh->commit;
-    my $sth=$dbh->prepare("SELECT S.UID,S.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT FROM ${prefix}SESSION AS S, ${prefix}USERS AS U WHERE S.SID=? AND S.UID=U.UID");
+    my $sth=$dbh->prepare("SELECT S.UID,S.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT,U.ADMIN FROM ${prefix}SESSION AS S, ${prefix}USERS AS U WHERE S.SID=? AND S.UID=U.UID");
     $sth->execute($session);
-    my ($uid,$level,$name,$uname,$active,$autoaccept) = $sth->fetchrow_array;
+    my ($uid,$level,$name,$uname,$active,$autoaccept,$isAdmin) = $sth->fetchrow_array;
     if (defined $uid) { # not expired, and matching session
       $auth_uid=$uid;
       $auth_level=max($auth_level,$level);
@@ -506,6 +516,7 @@ sub check_auth {
       $auth_active=$active;
       $auth_username=$uname;
       $auth_autoaccept=$autoaccept;
+      $auth_isadmin=$isAdmin;
       $auth_methods .= "|session|";
     } else {
       undef $session; # no valid $session - clear it to recreate it later
@@ -513,9 +524,9 @@ sub check_auth {
   }
   # try http auth
   if ($auth_level<0 && defined $ENV{REMOTE_USER}) {
-    my $sth4=$dbh->prepare("SELECT A.UID,A.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT FROM ${prefix}HTAUTH AS A, ${prefix}USERS AS U WHERE A.HTNAME=? AND U.UID=A.UID");
+    my $sth4=$dbh->prepare("SELECT A.UID,A.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT,U.ADMIN FROM ${prefix}HTAUTH AS A, ${prefix}USERS AS U WHERE A.HTNAME=? AND U.UID=A.UID");
     $sth4->execute($ENV{REMOTE_USER});
-    my ($uid,$level,$name,$uname,$active,$autoaccept)=$sth4->fetchrow_array;
+    my ($uid,$level,$name,$uname,$active,$autoaccept,$isAdmin)=$sth4->fetchrow_array;
     if (defined($uid)) {
       $auth_uid=$uid;
       $auth_level=max($auth_level,$level);
@@ -523,17 +534,18 @@ sub check_auth {
       $auth_username=$uname;
       $auth_active=$active;
       $auth_autoaccept=$autoaccept;
+      $auth_isadmin=$isAdmin;
       $auth_methods .= "|http|";
       $sth4->finish;
     }
     $sth4->finish;
   }
   # try password auth
-  if ($auth_level<0 && (defined $username && $username ne '' && ($auth_level>=$MIN_LEVEL_NOPASSSUDO || defined $password))) {
-    my $sth3=$dbh->prepare("SELECT A.UID,A.KEY,A.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT FROM ${prefix}PWAUTH AS A, ${prefix}USERS AS U WHERE U.UNAME=? AND U.UID=A.UID");
+  if (defined $username && $username ne '' && ($auth_level>=$MIN_LEVEL_NOPASSSUDO || defined $password)) {
+    my $sth3=$dbh->prepare("SELECT A.UID,A.KEY,A.LEVEL,U.FULLNAME,U.UNAME,U.ACTIVE,U.AUTOACCEPT,U.ADMIN FROM ${prefix}PWAUTH AS A, ${prefix}USERS AS U WHERE U.UNAME=? AND U.UID=A.UID");
     $sth3->execute($username);
     my $cnt=0;
-    while (my ($uid,$key,$level,$name,$uname,$active,$autoaccept)=$sth3->fetchrow_array) {
+    while (my ($uid,$key,$level,$name,$uname,$active,$autoaccept,$isAdmin)=$sth3->fetchrow_array) {
       $cnt++;
       if (($auth_level>=$MIN_LEVEL_NOPASSSUDO && $level<$auth_level) || (test_key($password,$key))) {
         if ($auth_level>=$MIN_LEVEL_SUDO) { # without sudo rights, drop to level of new user, otherwise keep level
@@ -546,6 +558,7 @@ sub check_auth {
         $auth_username=$uname;
         $auth_active=$active;
         $auth_autoaccept=$autoaccept;
+        $auth_isadmin=$isAdmin;
         $auth_methods .= "|password|";
         $sth3->finish;
         @path=() if (defined $path[0] && $path[0] eq 'login');
@@ -678,6 +691,22 @@ sub count_transaction {
     }
   } until (defined($locked) || $dbh->commit);
 }
+
+sub proc_unlock {
+  my ($nuid)=@_;
+  if(defined $nuid){
+      my $sth=$dbh->prepare("SELECT FULLNAME, EMAIL FROM ${prefix}USERS WHERE UID=?");
+      $sth->execute($nuid);
+      my ($fullname, $email) = $sth->fetchrow_array;
+     my $ok=open(PIPE,"|mail -s 'Unlock new account: $fullname' ".(defined($mailfrom) ? "-a 'From: $mailfrom'" : "")." '$mailto'");
+     if ($ok) {
+         #print PIPE "Hello, a new account has been created for $fullname with the following email address: $email. If you want to unlock this user, please follow this link.";
+         print PIPE "Hello,\n a new account has been created for $fullname, with the following email address: $email. If you want to unlock this user, please follow this link: ".url(-base=>1).genurl('unlock',$nuid)."\n\n-- \nKind regards,\n$title mailer\n";
+         $ok=(close PIPE) if ($ok);
+     }
+  }
+}
+
 
 # process a request
 sub proc_req {
@@ -815,14 +844,29 @@ sub calculate_active {
 }
 
 sub change_accept {
-  my ($uid,$am,$x,$tid) = @_;
+  my ($uid,$am,$x,$tid,$euid) = @_;
   return if (!$auth_active);
   my $ok=1;
   $am=0 if (!defined($am));
   $x=1 if (!defined($x));
   $dbh->begin_work;
-  my $sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
-  $sth->execute($x,$am,$uid,$tid);
+  my $sth;
+  if($auth_isadmin){
+    if($euid==$uid){
+	$sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
+        $sth->execute($x,$am,$uid,$tid);
+	#$sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
+        #$sth->execute($x,-$am,$beheer,$tid);
+    }else{
+	#$sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
+        #$sth->execute($x,-$am,$uid,$tid);
+        $sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
+        $sth->execute($x,$am,$beheer,$tid);
+    }
+  }else{
+    $sth=$dbh->prepare("UPDATE ${prefix}EF SET ACCEPT=?, SEEN=? WHERE UID=? AND TID=?");
+    $sth->execute($x,$am,$uid,$tid);
+  }
   $ok=calculate_active($tid,1);
   trycommit(0);
   return $ok;
@@ -965,7 +1009,7 @@ sub calculate_effects {
   return 1;
 }
 
-# use -2 for invalid, as -1 is already used for admin user
+# Use -2 for invalid, as -1 is already used for admin.
 sub lookup_user {
   need_user_list;
   my ($prefix) = @_;
@@ -1112,7 +1156,7 @@ sub process_bill {
             $contrib = $3;
             $pldef = $1;
           }
-          if ($pldef =~ /\A\$(-?[0-9]+)/) {
+          if ($pldef =~ /\A\$(-?[0-9]+)/){ #/\A\$([0-9]+)/) {
             $uid=$1;
             if ($mode==1) { # just expand uid into name
               need_user_list($uid);
@@ -1256,6 +1300,10 @@ sub show_form_add_pay {
   }
   print "</select></td></tr>\n";
   print "<tr class='tbleven'><td>paid me</td><td> $UNIT</td><td><input type='text' name='ap_value' value='0.00'></td></tr>\n";
+  print "<tr class='tblodd'><td>with description:</td><td></td><td> <input type='text' name='ap_descr' value=''></td>\n";
+  if($auth_isadmin){
+    print "<tr class='tbleven'><td>Beheer:</td><td></td><td><input type='checkbox' name='ap_beheer' value='1'></td></tr>\n";
+  }
   print "</table><br/>\n";
   print "<input type='submit' value='Add payment'></form><p>\n";
 }
@@ -1268,10 +1316,31 @@ sub show_form_add_bill {
   print "<table>\n";
   print "<tr class='tblodd'><td>I paid a bill</td><td><input type='text' name='ab_name'></td><td>(name)</td></tr>\n";
   print "<tr class='tbleven'><td>with description:</td><td> <input type='text' name='ab_descr' value=''></td><td></td>\n";
+  if($auth_isadmin){
+    print "<tr class='tblodd'><td>Beheer:</td><td><input type='checkbox' name='ab_beheer' value='1'></td><td></td></tr>\n";
+  }
   print "</table><br/>\n";
   print "<input type='submit' value='Add bill'><br>\n";
   print "</form>";
 }
+
+sub show_form_add_mobile {
+  return if (!$auth_active);
+  print "<h3>Interactive</h3>\n";
+#  print "A new, alternative interface for mobile transaction addition";
+  print "<form name='addmobile' action='".selfurl."' method='post'>\n";
+  print "<input type='hidden' name = 'cmd' value='addmobile'>\n";
+  print "<table>\n";
+  print "<tr class='tblodd'><td>I'm entering a bill </td><td><input type='text' name='ab_name'</td><td>(name)</td></tr>\n";
+  #print "<tr class='tbleven'><td>For</td><td><input type='text' name='ab_people' value='3'></td><td> other people</td>\n";
+  if($auth_isadmin){
+    print "<tr class='tbleven'><td>Beheer:</td><td><input type='checkbox' name='am_beheer' value='1'></td><td></td></tr>\n";
+  }
+  print "</table><br/>\n";
+  print "<input type='submit' value='Add bill'><br>\n";
+  print "</form>";
+}
+
 sub show_form_add_item {
   return if (!$auth_active);
   need_user_list;
@@ -1294,6 +1363,9 @@ sub show_form_add_item {
     if ($GROUPS{$_}->{PUBLIC}) { print "  <option value='$GROUPS{$_}->{GID}'>".htmlwrap($GROUPS{$_}->{DNAME})."</option>\n" };
   }
   print "</select></td><td></td></tr>";
+  if($auth_isadmin){
+    print "<tr class='tblodd'><td>Beheer:</td><td></td><td><input type='checkbox' name='ai_beheer' value='1'></td></tr>\n";
+  }
   print "</table><br/>\n";
   print "<input type='submit' value='Add item'><br>\n";
   print "</form>";
@@ -1335,7 +1407,8 @@ sub show_totals {
         if (defined($auth_uid) && ($_->{UID} == $auth_uid)) {
           ($hi1,$hi2)=("<b>","</b>");
         }
-        print "<tr class='tblunif'><td>$hi1".htmlwrap($_->{NAME})."$hi2</td><td style=\"text-align:right; background-color:".get_color($_->{EXTRA},226,226,226).";\">$hi1".( sprintf("$UNIT%.2f",$_->{TOTAL}))."<!-- + ".sprintf("%.4f",$_->{EXTRA})."; ".sprintf("%.0f",days_to_neutral($_->{TOTAL},$_->{EXTRA}))." days$accnr -->$hi2</td></tr> \n";
+        my $ab="";
+        print "<tr class='tblunif'><td>$hi1".htmlwrap($_->{NAME})."$hi2</td><td style=\"text-align:right; background-color:".get_color($_->{EXTRA},226,226,226).";\">$hi1".( sprintf("$UNIT%.2f",$_->{TOTAL}))."<!-- + ".sprintf("%.4f",$_->{EXTRA})."; ".sprintf("%.0f",days_to_neutral($_->{TOTAL},$_->{EXTRA}))." days$accnr -->$hi2</td>$ab</tr> \n";
       } else {
         print "<!-- ".htmlwrap($_->{NAME}).": total=".sprintf("$UNIT%.2f",$_->{TOTAL})." int=".sprintf("%.4f",$_->{EXTRA})."$accnr -->\n";
       }
@@ -1357,7 +1430,8 @@ sub show_totals {
         if (defined($_->{UID}) && $_->{UID} == $auth_uid) {
           ($hi1,$hi2)=("<b>","</b>");
         }
-        print "<tr class='tblunif'><td>$hi1".htmlwrap($_->{NAME})."$hi2</td><td style=\"text-align:right; background-color:".get_color($_->{EXTRA},226,226,226).";\">$hi1".( sprintf("$UNIT%.2f",$_->{TOTAL}))."<!-- + ".sprintf("%.4f",$_->{EXTRA})."; ".sprintf("%.0f",days_to_neutral($_->{TOTAL},$_->{EXTRA}))." days$accnr -->$hi2</td></td></tr> \n";
+	my $ab="";
+        print "<tr class='tblunif'><td>$hi1".htmlwrap($_->{NAME})."$hi2</td><td style=\"text-align:right; background-color:".get_color($_->{EXTRA},226,226,226).";\">$hi1".( sprintf("$UNIT%.2f",$_->{TOTAL}))."<!-- + ".sprintf("%.4f",$_->{EXTRA})."; ".sprintf("%.0f",days_to_neutral($_->{TOTAL},$_->{EXTRA}))." days$accnr -->$hi2</td>$ab</td></tr> \n";
       } else {
         print "<!-- ".htmlwrap($_->{NAME}).": total=";
         print sprintf("$UNIT%.2f",$_->{TOTAL});
@@ -1453,7 +1527,9 @@ sub describe {
   } else {
     $actorname=htmlwrap($USERS{$author}->{NAME});
   }
-  if ((($auth_uid==$author && $amount<0) || ($auth_uid!=$author && $amount>0)) && defined $affectuid) {
+  
+  my $amIAuthor = ($auth_uid==$author || ($auth_isadmin && $author==$beheer));
+  if ((($amIAuthor && $amount<0) || (!$amIAuthor && $amount>0)) && defined $affectuid) {
     my $sw=$affectname;
     $affectname=$actorname;
     $actorname=$sw;
@@ -1475,9 +1551,16 @@ sub describe {
 }
 
 sub show_history_line {
-  my ($amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num,$showch) = @_;
+  my ($euid, $amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num,$showch) = @_;
   my $st=($active ? "" : "text-decoration: line-through; ");
-  print "<tr class='".($num%2 ? "tbleven" : "tblodd")."' ><td style='$st'>";
+  my $strow;
+  if($num%2){
+	$strow = ($author ==$beheer || $affectuid==$beheer)? "style='background-color:rgb(124,252,0)'":"";#" style='background-color:$color'":"";
+  }else{
+        $strow = ($author ==$beheer || $affectuid==$beheer)? "style='background-color:rgb(190
+,255,90)'":"";
+  }
+  print "<tr class='".($num%2 ? "tbleven" : "tblodd")."'".$strow."><td style='$st'>";
   print (substr($wwhen,0,16) || "never");
   print "</td><td style='$st'>";
   my $descr=describe($amount,$name,$author,$affectuid,$affectgid,$type,$tid);
@@ -1494,6 +1577,9 @@ sub show_history_line {
   print "<input type='checkbox' name='hlx_$tid' value='1' ".($raccept ? '' : 'checked')." />";
   print "<input type='hidden' name='hlv_$tid' value='".($showch ? $amount : $seen)."' />";
   print "<input type='hidden' name='hlo_$tid' value='".((!defined $accept || ($showch && $changed)) ? "-1" : ($raccept ? "0" : "1"))."' />";
+  print "<input type='hidden' name='hla_$tid' value='$author'/>"; #Matthias
+  print "<input type='hidden' name='hlaf_$tid' value='$affectuid'/>";#Matthias
+  print "<input type='hidden' name='hleuid_$tid' value='$euid'/>";#Matthias
   print "</td>";
   if ($showch) {
     my $color=$amount>$seen ? 'black' : 'red';
@@ -1513,21 +1599,27 @@ sub show_history_line {
 
 sub show_warn {
   need_user_list;
-  my $sth=$dbh->prepare("SELECT E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE E.UID=? AND T.TID=E.TID AND (ABS(E.AMOUNT-E.SEEN)>=? OR E.ACCEPT=FALSE OR (T.ACTIVE=FALSE AND T.AUTHOR=E.UID)) ORDER BY WWHEN DESC");
-  $sth->execute($auth_uid,$THRESHOLD);
+  my $sth;
+  if($auth_isadmin){
+    $sth=$dbh->prepare("SELECT E.UID,E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE (E.UID=? OR E.UID=?) AND T.TID=E.TID AND (ABS(E.AMOUNT-E.SEEN)>=?  OR E.ACCEPT=FALSE OR (T.ACTIVE=FALSE AND T.AUTHOR=E.UID)) ORDER BY T.TID DESC, (ABS(E.UID-?))  DESC");
+    $sth->execute($auth_uid, $beheer, $THRESHOLD, $beheer);    
+  }else{
+    $sth=$dbh->prepare("SELECT E.UID,E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE E.UID=? AND T.TID=E.TID AND (ABS(E.AMOUNT-E.SEEN)>=? OR E.ACCEPT=FALSE OR (T.ACTIVE=FALSE AND T.AUTHOR=E.UID)) ORDER BY WWHEN DESC");
+    $sth->execute($auth_uid,$THRESHOLD);
+  }
   my $warned=0;
   my $changes=0;
   my $num=0;
   my @ids=();
   print "<h3>Notifications for ".htmlwrap($auth_fullname).":</h3>\n";
-  while (my ($amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active) = $sth->fetchrow_array) {
+  while (my ($euid,$amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active) = $sth->fetchrow_array) {
     if (!$warned) {
       print "<form name='editwarn' action='".selfurl."' method='post'>\n";
       print "<table>";
       print "<tr class='tblhead'><th>Date</th><th>Reason</th><th>Amount</th><th>Denied</th><th>Changed</th></tr>\n";
       $warned=1;
     }
-    push @ids,show_history_line($amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num++,1);
+    push @ids,show_history_line($euid,$amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num++,1);
     if (abs($seen-$amount)>$THRESHOLD) {
       $changes++;
     }
@@ -1557,12 +1649,17 @@ sub show_history {
   print "<form name='edithistory' action='".selfurl."' method='post'>\n";
   print "<table>";
   print "<tr class='tblhead'><th>Date</th><th>Reason</th><th>Amount</th><th>Denied</th></tr>\n";
-  $sth=$dbh->prepare("SELECT E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE E.UID=? AND T.TID=E.TID ORDER BY T.WWHEN DESC".($all ? "" : " LIMIT 50"));
-  $sth->execute($auth_uid);
+  if($auth_isadmin){
+    $sth=$dbh->prepare("SELECT DISTINCT ON (T.TID) E.UID, E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE (E.UID=? OR E.UID=?) AND T.TID=E.TID ORDER BY T.TID DESC".($all ? "" : " LIMIT 50"));
+    $sth->execute($auth_uid, $beheer);
+  }else{
+    $sth=$dbh->prepare("SELECT E.UID, E.AMOUNT,E.SEEN,E.ACCEPT,T.NAME,T.AUTHOR,T.AFU,T.AFG,T.WWHEN,T.TYP,T.TID,T.ACTIVE FROM ${prefix}EF E, ${prefix}TR T WHERE E.UID=? AND T.TID=E.TID ORDER BY T.WWHEN DESC".($all ? "" : " LIMIT 50"));
+    $sth->execute($auth_uid);
+  }
   my @ids=();
   my $num=0;
-  while (my ($amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active) = $sth->fetchrow_array) {
-    push @ids,show_history_line($amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num++,0);
+  while (my ($euid, $amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active) = $sth->fetchrow_array) {
+    push @ids,show_history_line($euid, $amount,$seen,$accept,$name,$author,$affectuid,$affectgid,$wwhen,$type,$tid,$active,$num++,0);
   }
   $sth->finish;
   print "</table>";
@@ -1596,6 +1693,12 @@ sub output_header {
   print "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n";
   print "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\" >\n";
   print "<head>\n";
+  print "<script src='revue.vtk.be/intern/kas/matthias/autocomplete.js'></script>";
+  #print "function autocomplete(){\n";
+  #print "alert('t');\n";
+  #print "var x = document.forms['doeb'];\n i=0;\n while(x['user_'+i]!==undefined){\n if(i!=0){ \n document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \@' + x['value_'+i].value + '\n' + document.forms['doeb']['eb_def'].value; \n }else{\n document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + '\n' + document.forms['doeb']['eb_def'].value; \n} \n i++;\n}";
+  #print "}\n";
+  #print "</script>\n";
   print "<style type=\"text/css\">\n";
   print "/* css shamefully copied from P. Michaud's PmWiki */\n";
   print "body { margin:0px; background-color:#f7f7f7; font-family:Arial,Helvetica,sans-serif; font-size:11pt; }\n";
@@ -1819,18 +1922,34 @@ if ($command eq 'dohl' && defined $auth_username) {
     my $x=param("hlx_$id") ? 1 : 0;
     my $am=param("hlv_$id");
     my $o=param("hlo_$id");
+    my $author = param("hla_$id");
+    my $affectuid = param("hlaf_$id");
+    my $euid = param("hleuid_$id");
     if (defined $x && defined $am && defined $o && $x!=$o) {
-      change_accept($auth_uid,$am,1-$x,$id);
+#      if($auth_isadmin && ($affectuid==$beheer || $author == $beheer)){
+#            if($author == $beheer){
+#                 change_accept($auth_uid,$am,1-$x,$id);
+#            }else{
+#		 change_accept($beheer,-$am,1-$x,$id);
+#            }
+#      }else{
+            change_accept($auth_uid,$am,1-$x,$id,$euid);
+#      }
     }
   }
 }
 if ($command eq 'addpay' && defined $auth_username) { while(1) {
+  my $asbeheer = (param('ap_beheer') eq '1' && $auth_isadmin)? 1:0;
   my $c_value = calc(param('ap_value'));
   if (!defined $c_value || $c_value<=0) {
     push @msg,["error","Invalid amount for payment: ".htmlwrap(param('ap_value') || "")];
     last;
   }
-  my ($u1,$u2,$val)=(param('ap_user'),$auth_uid,$c_value);
+  my ($u1,$u2,$val)=(param('ap_user'),($asbeheer)?$beheer:$auth_uid,$c_value);
+  if($u1 == $u2){
+    push @msg, ["error","Beheer kan niets betalen aan beheer."];
+    last;
+  }
   need_user_list;
   if (!defined $USERS{$u1}->{VIS}) {
     push @msg,['warn',"Please select a user"];
@@ -1840,8 +1959,8 @@ if ($command eq 'addpay' && defined $auth_username) { while(1) {
   $sth->execute;
   my ($tid) = $sth->fetchrow_array;
   $dbh->begin_work;
-  $sth=$dbh->prepare("INSERT INTO ${prefix}TR (tid,author,afu,typ) values (?,?,?,'i')");
-  $sth->execute($tid,$u2,$u1);
+  $sth=$dbh->prepare("INSERT INTO ${prefix}TR (tid,author,afu,typ, descr) values (?,?,?,'i',?)");
+  $sth->execute($tid,$u2,$u1,param('ap_descr'));
   $sth=$dbh->prepare("INSERT INTO ${prefix}ITEM (tid,amount) values (?,?)");
   $sth->execute($tid,-$val);
   calculate_effects($tid,1);
@@ -1852,6 +1971,7 @@ if ($command eq 'addpay' && defined $auth_username) { while(1) {
   last;
 } }
 if ($command eq 'addwant' && defined $auth_username) { while(1) {
+  my $asbeheer = (param('ai_beheer') eq '1' && $auth_isadmin)? 1:0;
   my $gid;
   my $uid;
   my $c_value=calc(param('aw_value'));
@@ -1887,7 +2007,7 @@ if ($command eq 'addwant' && defined $auth_username) { while(1) {
     $dbh->begin_work;
   } 
   $sth=$dbh->prepare("INSERT INTO ${prefix}TR (TID,AUTHOR,AFG,AFU,NAME,DESCR,TYP) VALUES (?,?,?,?,?,?,'i')");
-  $sth->execute($tid,$auth_uid,$gid,$uid,param('aw_name'),param('aw_descr'));
+  $sth->execute($tid,($asbeheer)?$beheer:$auth_uid,$gid,$uid,param('aw_name'),param('aw_descr'));
   $sth=$dbh->prepare("INSERT INTO ${prefix}ITEM (TID,AMOUNT) VALUES (?,?)");
   $sth->execute($tid,$c_value);
   calculate_effects($tid,1);
@@ -1900,12 +2020,13 @@ if ($command eq 'addwant' && defined $auth_username) { while(1) {
   last;
 } }
 if ($command eq 'addbill' && defined $auth_username) { while(1) {
+  my $asbeheer = (param('ab_beheer') eq '1' && $auth_isadmin)? 1:0;  
   my $sth=$dbh->prepare("SELECT nextval('${prefix}NTR')");
   $sth->execute;
   my ($tid)=$sth->fetchrow_array;
   $dbh->begin_work;
   $sth=$dbh->prepare("INSERT INTO ${prefix}TR (TID,AUTHOR,NAME,DESCR,TYP) VALUES (?,?,?,?,'b')");
-  $sth->execute($tid,$auth_uid,param('ab_name'),param('ab_descr'));
+  $sth->execute($tid,($asbeheer)?$beheer:$auth_uid,param('ab_name'),param('ab_descr'));
   $sth=$dbh->prepare("INSERT INTO ${prefix}BILL (TID,DEFINITION) VALUES (?,'')");
   $sth->execute($tid);
   log_action("create bill tid=$tid name='".param('ab_name')."' descr='".param('ab_descr')."'");
@@ -1913,6 +2034,22 @@ if ($command eq 'addbill' && defined $auth_username) { while(1) {
   trycommit(1,'bill',$tid);
   last;
 } }
+if ($command eq 'addmobile' && defined $auth_username) { while(1) {
+ my $asbeheer = (param('am_beheer') eq '1' && $auth_isadmin)? 1:0;
+ my $sth=$dbh->prepare("SELECT nextval('${prefix}NTR')"); #Get the newest transaction id
+ $sth->execute;
+ my ($tid)=$sth->fetchrow_array;
+ $dbh->begin_work;
+ $sth=$dbh->prepare("INSERT INTO ${prefix}TR (TID,AUTHOR,NAME,TYP) VALUES (?,?,?,'b')");
+ $sth->execute($tid,($asbeheer)?$beheer:$auth_uid,param('ab_name'));
+ $sth=$dbh->prepare("INSERT INTO ${prefix}BILL (TID,DEFINITION) VALUES (?,'')");
+ $sth->execute($tid);
+ log_action("create bill tid=$tid name='".param('ab_name')."'");
+ calculate_effects($tid,1);
+ trycommit(1,'mobile',$tid, param('ab_people'));
+ last;
+} }
+
 if ($command eq 'doeg' && defined $auth_username) { while(1) {
   exit if (!$auth_active);
   my $dgid=param('eg_gid');
@@ -1995,7 +2132,7 @@ if ($command eq 'doep' && defined $auth_username) { while(1) {
   my ($pfrom,$pto,$wwhen,$amount)=$sth->fetchrow_array;
   my $ok=1;
   my $dodel=0;
-  if (defined $pfrom && $pfrom==$auth_uid) {
+  if (defined $pfrom && ($pfrom==$auth_uid || ($auth_isadmin && $pfrom == $beheer))) {
     if (param('ep_delete')) {
       delete_transaction($tid,'i',0);
       last;
@@ -2025,7 +2162,7 @@ if ($command eq 'doeb' && defined $auth_username) { while(1) {
   my ($pfrom,$wwhen,$def)=$sth->fetchrow_array;
   my $ok=1;
   my $dodel=0;
-  if (defined $pfrom && $pfrom==$auth_uid) {
+  if (defined $pfrom && ($pfrom==$auth_uid || ($auth_isadmin && $pfrom==$beheer))) { #Matthias
     if (param('eb_delete')) {
       delete_transaction($tid,'b',0);
       last;
@@ -2068,7 +2205,7 @@ if ($command eq 'doew' && defined $auth_username) { while(1) {
   my ($wanter,$wanted,$wwhen,$amount)=$sth->fetchrow_array;
   $sth->finish;
   my $ok=1;
-  if (defined($wanter) && $wanter==$auth_uid) {
+  if (defined($wanter) && ($wanter==$auth_uid || ($auth_isadmin && $wanter==$beheer))) {
     if (param('ew_delete')) {
       delete_transaction($tid,'i',0);
       last;
@@ -2139,6 +2276,7 @@ while(1) {
     print "uid: $auth_uid\n";
     print "fullname: $auth_fullname\n";
     print "level: $auth_level\n";
+    print "admin: $auth_isadmin\n";
     print "path: ".(join(' ',@path))."\n";
     print "abs url: ".url(-absolute=>1)."\n";
     print "rel url: ".url(-relative=>1)."\n";
@@ -2221,14 +2359,19 @@ while(1) {
       next;
     }
     if ($pfrom != $auth_uid && $pto != $auth_uid) {
-      push @msg,['error',"Permission denied for viewing payment"];
-      @path=();
-      next;
+      if (! $auth_isadmin || ($pfrom != $beheer && $pto != $beheer)) {
+        push @msg,['error',"Permission denied for viewing payment"];
+        @path=();
+        next;
+      }
     }
     need_user_list;
     output_header;
-    if ($pto eq $auth_uid) {
+    if ($pto eq $auth_uid || ($auth_isadmin && $pto == $beheer)) {
       print "<h3>Edit payment</h3>\n";
+      if($pto == $beheer && $auth_uid!=$beheer){ # The $auth_isadmin assumption is valid at this moment.
+          print "<div class='msginfo'>You're editing this bill as beheer</div>";
+      }      
     } else {
       print "<h3>View payment</h3>\n";
     }
@@ -2240,7 +2383,7 @@ while(1) {
     my $ptname=$USERS{$pto}->{NAME};
     print "<tr class='tbleven'><td>From:</td><td> ".htmlwrap($pfname)."</td></tr>\n";
     print "<tr class='tblodd'><td>To:</td><td> ".htmlwrap($ptname)."</td></tr>\n";
-    if ($pto eq $auth_uid) {
+    if ($pto eq $auth_uid || $pto eq $beheer) {
       print "<tr class='tbleven'><td>Amount:</td><td> <input type='text' name='ep_value' value='".(-$amount)."'></td></tr>\n";
       print "</table>\n";
       print "<input type='hidden' name='cmd' value='doep'>\n";
@@ -2278,8 +2421,11 @@ while(1) {
       next;
     }
     output_header;
-    if ($wanter eq $auth_uid) {
+    if ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer)) {
       print "<h3>Edit item</h3>\n";
+      if(!($auth_uid==$beheer) && $wanter == $beheer){
+	 print "<div class='msginfo'>You're editing this bill as beheer</div>";
+      }
     } else {
       print "<h3>View item</h3>\n";
     }
@@ -2289,8 +2435,8 @@ while(1) {
     print "<tr class='tblodd'><td>When:</td><td>".substr($wwhen,0,16)."</td></tr>\n";
     print "<tr class='tbleven'><td>Paid by:</td><td> ".htmlwrap($USERS{$wanter}->{NAME})."</td></tr>\n";
     print "<tr class='tblodd'><td>Paid for:</td><td> <a href='".genurl('group',$wantedg)."'>".htmlwrap($GROUPS{$wantedg}->{DNAME})."</a></td></tr>\n" if (defined $wantedg);
-    print "<tr class='tblodd'><td>Paid for:</td><td> ".htmlwrap($USERS{$wantedu}->{NAME})."</td></tr>\n" if (defined $wantedu);
-    if ($wanter eq $auth_uid) {
+    print "<tr class='tblodd'><td>Paid for:</td><td> ".htmlwrap($USERS{$wantedu}->{NAME})."</a></td></tr>\n" if (defined $wantedu);
+    if ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer)) {
       print "<tr class='tbleven'><td>Name:</td><td> <input type='text' name='ew_name' value='".htmlwrap($name)."'></td></tr>\n";
       print "<tr class='tblodd'><td>Description:</td><td><textarea rows='3' cols='60' name='ew_name'>".htmlwrap($descr,1)."</textarea></td></tr>\n";
       print "<tr class='tbleven'><td>Amount:</td><td> <input type='text' name='ew_value' value='$amount'></td></tr>\n";
@@ -2309,8 +2455,9 @@ while(1) {
     $sth->finish;
     output_footer;
     last;
-  } elsif ($menu eq 'bill' && defined $auth_username) {
+  } elsif ($menu eq 'mobile' && defined $auth_username) {
     my $tid=$path[1];
+    my $amountOfPeople = $path[2];
     my $sth=$dbh->prepare("SELECT T.AUTHOR,B.DEFINITION,T.NAME,T.DESCR,T.WWHEN FROM ${prefix}TR T, ${prefix}BILL B WHERE T.TID=? AND B.TID=?");
     $sth->execute($tid,$tid);
     my ($definer,$definition,$name,$descr,$wwhen)=$sth->fetchrow_array;
@@ -2324,13 +2471,28 @@ while(1) {
     $sth->execute($tid,$auth_uid);
     my ($cnt)=$sth->fetchrow_array;
     if ($cnt==0) {
-      push @msg,['error',"Permission denied for viewing bill"];
-      @path=();
-      next;
+      if($auth_isadmin){
+        my $sth2=$dbh->prepare("SELECT COUNT(*) FROM ${prefix}EF WHERE TID=? AND UID=?");
+        $sth2->execute($tid,$beheer);
+        my($cnt2)=$sth2->fetchrow_array;
+        if($cnt2==0){
+           push @msg,['error',"Permission denied for viewing bill"];
+           @path=();
+           next;
+        }
+      }else{
+          push @msg,['error',"Permission denied for viewing bill"];
+          @path=();
+          next;
+      }
     }
     output_header;
-    if ($definer == $auth_uid) {
+    my $isdefiner = ($definer == $auth_uid) || ($auth_isadmin && $definer == $beheer);
+    if ($isdefiner) {
       print "<h3>Edit bill</h3>\n";
+      if($auth_isadmin && $auth_uid!=$beheer && $definer == $beheer){
+          print "<div class='msginfo'>You're editing this bill as beheer</div>";
+      }
     } else {
       print "<h3>View bill</h3>\n";
     }
@@ -2340,7 +2502,162 @@ while(1) {
     print "<table>\n";
     print "<tr class='tblodd'><td>When:</td><td>".substr($wwhen,0,16)."</td></tr>\n";
     print "<tr class='tbleven'><td>Paid by:</td><td> ".htmlwrap($USERS{$definer}->{NAME})."</td></tr>\n";
-    my ($ndef,$err,$tot,$cont,@eff)=process_bill($definition,$definer==$auth_uid ? 2 : 1);
+    my ($ndef,$err,$tot,$cont,@eff)=process_bill($definition,$isdefiner ? 2 : 1);
+    print "<tr class='tblodd'><td>Name:</td><td> <input type='text' name='eb_name' value='".htmlwrap($name)."'></td></tr>\n";
+    print "<tr class='tbleven'><td>Description:</td><td><textarea rows='3' cols='60' name='eb_descr'>".htmlwrap($descr,1)."</textarea></td></tr>\n";
+    print "<tr class='tblodd'><td>Total amount:</td><td>".sprintf("$UNIT%.2f",$tot)."</td></tr>\n";
+    print "<tr class='tbleven'><td>Contributions:</td><td>".sprintf("$UNIT%.2f",$cont)."</td></tr>\n";
+    print "<tr class='tblodd'><td></td><td>\n<table>";
+    print "<th><td>User</td><td>Amount</td><td>Nickname</td></th>";
+    print "<tr><td></td><td><select name='user_0'>";
+    if($auth_isadmin && ($definer==$beheer)){
+            print "<option value='beheer'>beheer</option>";
+    }else{
+	    print "<option value='$auth_fullname'>$auth_fullname</option>";
+    }
+    print "</select></td><td><input type='text' name='value_0'></td><td><input type='text' name='nick_0' value='P0'></td></tr>";
+    print "</td></tr>";
+    need_user_list;
+
+    my $filterid = ($definer==$beheer)?$beheer:$auth_uid;
+    my $size = values %USERS;
+
+    #FIRST ENTRY
+    print "<tr id='rowfor1' style=''><td></td><td><select name='user_1' onchange=\"if(this.selectedIndex != 0){document.getElementById('rowfor2').style.display='';}\">";
+    print "<option value=''></option>";
+    for (sort {lc($a->{NAME}) cmp lc($b->{NAME})} (values %USERS)){
+        print "<option value='$_->{NAME}'>".htmlwrap($_->{NAME})."</option>\n" if (defined($_->{VIS}) && $_->{ACTIVE} &&  $_->{UID}!=$filterid);
+    }
+    if($definer==$beheer && $auth_uid!=$beheer){
+        print "<option value='$auth_fullname'>".$auth_fullname."</option>\n";
+    }
+    print "</select></td><td><input type='text' name='value_1' value='0.0'></td><td><input type='text' name='nick_1' value='P1'></td></tr>";
+       
+    #LOOP OF ENTRIES
+    for(my $count = 2; $count<$size-1; $count = $count+1){
+        my $nextrow = $count+1;
+	print "<tr id='rowfor$count' style='display:none'><td></td><td><select name='user_$count' onchange=\"if(this.selectedIndex != 0){document.getElementById('rowfor$nextrow').style.display='';}\">";
+		print "<option value=''></option>";
+	for (sort {lc($a->{NAME}) cmp lc($b->{NAME})} (values %USERS)){
+ 		print "<option value='$_->{NAME}'>".htmlwrap($_->{NAME})."</option>\n" if (defined($_->{VIS}) && $_->{ACTIVE} &&  $_->{UID}!=$filterid);
+        }
+	if($definer==$beheer && $auth_uid!=$beheer){
+		print "<option value='$auth_fullname'>".$auth_fullname."</option>\n";
+	}
+	print "</select></td><td><input type='text' name='value_$count' value='0.0'></td><td><input type='text' name='nick_$count' value='P$count'></td></tr>";
+    }
+
+    #LAST ENTRY
+    
+    my $count = $size-1;
+    print "<tr id='rowfor$count' style='display:none'><td></td><td><select name='user_$count'>";
+    print "<option value=''></option>";
+    for (sort {lc($a->{NAME}) cmp lc($b->{NAME})} (values %USERS)){
+        print "<option value='$_->{NAME}'>".htmlwrap($_->{NAME})."</option>\n" if (defined($_->{VIS}) && $_->{ACTIVE} &&  $_->{UID}!=$filterid);
+    }
+    if($definer==$beheer && $auth_uid!=$beheer){
+        print "<option value='$auth_fullname'>".$auth_fullname."</option>\n";
+    }
+    print "</select></td><td><input type='text' name='value_$count' value='0.0'></td><td><input type='text' name='nick_$count' value='P$count'></td></tr>";    
+
+    print "</table></td></tr>\n";
+    print "<tr class='tbleven'><td>Bill:</td><td><textarea rows='20' cols='60' name='eb_def'>".htmlwrap($ndef,1)."</textarea></td></tr>\n";
+    print "<tr class='tblodd'><td>Personal detail:</td><td><ul>";
+    foreach my $eff (@eff) {
+      my ($uid,$num,$den,$amount,$name)=@{$eff};
+      if ($uid==$auth_uid && $num!=0 && $amount != 0) {
+        print ("<li>".(sprintf("$UNIT%.2f",$amount*$num/$den))." [");
+         if ($num>=1 && $den==1) {
+          print "Contribution";
+        } else {
+          if ($num<-1 && $den==1) {
+            print ((-$num)."x ");
+          } elsif ($num<0 && $den>1) {
+            print ((-$num)."/".($den)." of ");
+          }
+          if (defined $name) {
+            print htmlwrap($name);
+          } else {
+            print sprintf("$UNIT%.2f",$amount)." item";
+          }
+        }
+        print "]</li>\n";
+      }
+    }
+    print "</ul></td></tr>\n";
+    if ($isdefiner) {
+      print "<input type='hidden' name='cmd' value='doeb'>\n";
+      print "</table>\n";
+      #my $jscript = "var x = document.forms['doeb']; i=0; while(x['user_'+i]!==undefined){document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + (i==0)?'':' \@' + x['value_'+i].value + '\n' + document.forms['doeb']['eb_def'].value;i++;};";
+      #my $jscript = "var x = document.forms['doeb']; i=0; while(x['user_'+i]!==undefined){if(i!=0){document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \@' + x['value_'+i].value + '\n' + document.forms['doeb']['eb_def'].value}else{document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + document.forms['doeb']['eb_def'].value};i++;};";
+      #my $jscript = "var x = document.forms['doeb']; i=0; while(x['user_'+i]!==undefined){if(i!=0){document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \@' + x['value_'+i].value + '\n' + document.forms['doeb']['eb_def'].value}else{document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + '\n' + document.forms['doeb']['eb_def'].value};i++;};";
+#      print "<input type='submit' value='Save' onclick=\"javascript:var x = document.forms['doeb']; i=0; while(x['user_'+i]!==undefined){if(i!=0){document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \\\@' + x['value_'+i].value + '\\n' + document.forms['doeb']['eb_def'].value}else{document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + '\\n' + document.forms['doeb']['eb_def'].value};i++;};\">" if ($auth_active);
+      print "<input type='submit' value='Save' onclick=\"javascript:var x = document.forms['doeb']; i=0;while(i<$size){if(i!=0){if(x['user_'+i].value !=='' && x['user_'+i]!==undefined){document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \\\@' + x['value_'+i].value + '\\n' +document.forms['doeb']['eb_def'].value}}else{document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + '\\n' + document.forms['doeb']['eb_def'].value};i++;};\">" if ($auth_active);
+#      print "<input type='submit' value='Save' 
+#onclick=\"javascript:var x = document.forms['doeb']; i=0; 
+#while(x['user_'+i]!==undefined){
+#if(i!=0){
+#document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + ' \\\@' + x['value_'+i].value + '\\n' + document.forms['doeb']['eb_def'].value
+#}else{
+#document.forms['doeb']['eb_def'].value=x['nick_'+i].value + ' = ' + x['user_'+i].value + '\\n' + document.forms['doeb']['eb_def'].value};i++;};\
+#">" if ($auth_active);
+      #print "<input type='submit' value='Save' />" if ($auth_active);
+      print "<input type='submit' name='eb_delete' value='Delete' />";
+    } else {
+      print "</table>\n";
+    }
+    print "</form><br/>";
+    print "<a href='$URL'>Go back</a>\n";
+    $sth->finish;
+    output_footer;
+    last;
+  } elsif ($menu eq 'bill' && defined $auth_username) {   
+    my $tid=$path[1];
+    my $sth=$dbh->prepare("SELECT T.AUTHOR,B.DEFINITION,T.NAME,T.DESCR,T.WWHEN FROM ${prefix}TR T, ${prefix}BILL B WHERE T.TID=? AND B.TID=?");
+    $sth->execute($tid,$tid);
+    my ($definer,$definition,$name,$descr,$wwhen)=$sth->fetchrow_array;
+    if (!defined $definer) {
+      push @msg,['error',"Bill does not exist"];
+      @path=();
+      next;
+    }
+    need_user_list;   
+    $sth=$dbh->prepare("SELECT COUNT(*) FROM ${prefix}EF WHERE TID=? AND UID=?");
+    $sth->execute($tid,$auth_uid);
+    my ($cnt)=$sth->fetchrow_array;
+    if ($cnt==0) { #Matthias:
+      if($auth_isadmin){
+        my $sth2=$dbh->prepare("SELECT COUNT(*) FROM ${prefix}EF WHERE TID=? AND UID=?");
+        $sth2->execute($tid,$beheer);
+        my($cnt2)=$sth2->fetchrow_array;
+        if($cnt2==0){
+           push @msg,['error',"Permission denied for viewing bill"];
+           @path=();
+           next;
+        }
+      }else{
+        push @msg,['error',"Permission denied for viewing bill"];
+        @path=();
+        next;
+      }
+    }
+    output_header;
+    my $isdefiner = ($definer == $auth_uid) || ($auth_isadmin && $definer == $beheer);
+    if ($isdefiner) {
+      print "<h3>Edit bill</h3>\n";
+      if($auth_isadmin && $auth_uid!=$beheer && $definer == $beheer){
+	  print "<div class='msginfo'>You're editing this bill as beheer</div>";
+      }
+    } else {
+      print "<h3>View bill</h3>\n";
+    }
+    print "To learn more about bills, see the <a href='".genurl('help','bill')."'>help</a> pages<p/>\n";
+    print "<form name='doeb' action='".selfurl."' method='post'>\n";
+    print "<input type='hidden' name='eb_id' value='$tid'>\n";
+    print "<table>\n";
+    print "<tr class='tblodd'><td>When:</td><td>".substr($wwhen,0,16)."</td></tr>\n";
+    print "<tr class='tbleven'><td>Paid by:</td><td> ".htmlwrap($USERS{$definer}->{NAME})."</td></tr>\n";
+    my ($ndef,$err,$tot,$cont,@eff)=process_bill($definition,$isdefiner? 2 : 1);
     print "<tr class='tblodd'><td>Name:</td><td> <input type='text' name='eb_name' value='".htmlwrap($name)."'></td></tr>\n";
     print "<tr class='tbleven'><td>Description:</td><td><textarea rows='3' cols='60' name='eb_descr'>".htmlwrap($descr,1)."</textarea></td></tr>\n";
     print "<tr class='tblodd'><td>Total amount:</td><td>".sprintf("$UNIT%.2f",$tot)."</td></tr>\n";
@@ -2369,7 +2686,7 @@ while(1) {
       }
     }
     print "</ul></td></tr>\n";
-    if ($definer eq $auth_uid) {
+    if ($isdefiner) {
       print "<input type='hidden' name='cmd' value='doeb'>\n";
       print "</table>\n";
       print "<input type='submit' value='Save' />" if ($auth_active);
@@ -2401,7 +2718,6 @@ while(1) {
     }
     print "<input type='hidden' name='ev_uids' value='".join(',',sort keys %au)."'>\n";
     print "<p/><input type='submit' value='Submit'>\n";
-    print "</form>\n";
     output_footer;
   } elsif ($menu eq 'rss') { # TODO: up-to-date brengen
     need_user_list;
@@ -2438,11 +2754,12 @@ while(1) {
     }
     print "   </channel>\n";
     print "</rss>\n";
-  } elsif ($menu eq 'activate') {
+  }elsif ($menu eq 'activate') {
     my $code=$path[1];
     my $nuid=proc_req($code);
     if (defined $nuid) {
       push @msg,['info',"Creation succesful. You can log in now."];
+      proc_unlock($nuid);
       @path=();
       next;
     } else {
@@ -2450,6 +2767,30 @@ while(1) {
       output_header;
       output_footer;
     }
+  }elsif ($menu eq 'unlock') {
+    my $uid=$path[1];
+    output_header;
+    #push @msg,['info', "only appropriate users should see this"];
+    if ($auth_isadmin){
+       my $sth=$dbh->prepare("SELECT ACTIVE FROM ${prefix}USERS WHERE UID=?");
+       $sth->execute($uid);
+       my ($active) = $sth->fetchrow_array;
+       if ($active){
+          print "Account already unlocked!";
+       }
+       else{
+          if (defined $active){
+             my $sth=$dbh->prepare("UPDATE ${prefix}USERS SET ACTIVE=TRUE WHERE UID=?");
+             $sth->execute($uid);
+             print "Account was succesfully unlocked.";
+          }else{
+             print "No such user.";
+          }
+       }
+    }else{
+       print  "Only specific users can unlock another user.";
+    }
+    output_footer;
   } elsif ($menu eq 'overview' && defined $auth_username) {
     need_user_list;
     if ((scalar (grep { ($USERS{$_}->{UID} ne $auth_uid) && (defined $USERS{$_}->{VIS}) && ($USERS{$_}->{ACTIVE})} (keys %USERS)))==0) {
@@ -2477,6 +2818,8 @@ while(1) {
     show_form_add_item;
     print "<hr/>\n";
     show_form_add_bill;
+    print "<hr/>\n";
+    show_form_add_mobile;
     output_footer;
   } elsif ($menu eq 'settings') {
     output_header;
