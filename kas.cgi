@@ -697,7 +697,7 @@ sub proc_unlock {
     my ($fullname, $email) = $sth->fetchrow_array;
     my $ok=open(PIPE,"|mail -s 'Unlock new account: $fullname' ".(defined($mailfrom) ? "-a 'From: $mailfrom'" : "")." '$mailto'");
     if ($ok) {
-       print PIPE "Hello,\n a new account has been created for $fullname, with the following email address: $email. If you want to unlock this user, please follow this link: ".url(-base=>1).genurl('unlock',$nuid)."\n\n-- \nKind regards,\n$title mailer\n";
+       print PIPE "Hello,\n\nA new account has been created for $fullname, with the following email address: $email.\nIf you want to unlock this user, please follow this link: ".url(-base=>1).genurl('unlock',$nuid)."\n\nKind regards,\n$title Mailer\n";
        $ok=(close PIPE) if ($ok);
     }
   }
@@ -2001,7 +2001,7 @@ if ($command eq 'dona') {
     }
     if ($ok) {
       $ok=open(PIPE,"|mail -s 'New account: $title' ".(defined($mailfrom) ? "-a 'From: $mailfrom'" : "")." '$email'");
-      if ($ok) { print PIPE "Hello $fullname,\n\na new $title account has been created for you.\nTo activate it, use this link:\n\n  ".url(-base=>1).genurl('activate',$rid)."\n\n-- \nKind regards,\n$title mailer\n"; }
+      if ($ok) { print PIPE "Hello $fullname,\n\nA new $title account has been created for you.\nTo activate it, follow this link:\n\n  ".url(-base=>1).genurl('activate',$rid)."\n\nKind regards,\n$title Mailer\n"; }
       $ok=(close PIPE) if ($ok);
       push @msg,['info',"An activation code was mailed to ".htmlwrap($email).". It will remain valid for a week."] if ($ok);
       push @msg,['error',"Could not send e-mail. Try again or contact administrator."] if (!$ok);
@@ -2550,8 +2550,7 @@ while(1) {
     if ($pto eq $auth_uid || ($auth_isadmin && $pto == $beheer)) {
       print "<legend>Edit payment</legend>\n";
       if($pto == $beheer && $auth_uid!=$beheer){ # The $auth_isadmin assumption is valid at this moment.
-          print "<div class='msginfo'>You're editing this bill as beheer</div>";
-          push @msg,['warn',"You're editing this bill as beheer"];
+          push @msg,['info',"You're editing this bill as beheer"];
       }
     } else {
       print "<legend>View payment</legend>\n";
@@ -2639,7 +2638,7 @@ while(1) {
     if ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer)) {
       print "<legend>Edit item</legend>\n";
       if(!($auth_uid==$beheer) && $wanter == $beheer) {
-        push @msg,['warn',"You're editing this bill as beheer"];
+        push @msg,['info',"You're editing this bill as beheer"];
       }
     } else {
       print "<legend>View item</legend>\n";
@@ -2732,7 +2731,7 @@ while(1) {
     if ($isdefiner) {
       print "<h3>Edit bill</h3>\n";
       if($auth_isadmin && $auth_uid!=$beheer && $definer == $beheer){
-          print "<div class='msginfo'>You're editing this bill as beheer</div>";
+          push @msg,['info',"You're editing this bill as beheer"];
       }
     } else {
       print "<h3>View bill</h3>\n";
@@ -2890,7 +2889,7 @@ while(1) {
     if ($isdefiner) {
       print "<legend>Edit bill</legend>\n";
       if($auth_isadmin && $auth_uid!=$beheer && $definer == $beheer){
-        push @msg,['warn',"You're editing this bill as beheer"];
+        push @msg,['info',"You're editing this bill as beheer"];
       }
     } else {
       print "<legend>View bill</legend>\n";
