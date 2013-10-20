@@ -72,9 +72,8 @@ my $session=cookie('session');
 my $mailfrom;
 my $mailto;
 
-# The 'beheer' account id.
+# 'beheer' account id
 my $beheer;
-my $beheer_name;
 
 # cached database information
 my %USERS; my $haveUSERS=0; my %FUSERS;
@@ -309,7 +308,6 @@ sub connect_db {
   $mailfrom=$CONF{mailfrom};
   $mailto=$CONF{mailto};
   $beheer=$CONF{beheer};
-  $beheer_name=$CONF{beheername};
 }
 
 sub reset_db {
