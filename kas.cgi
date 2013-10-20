@@ -1909,7 +1909,7 @@ sub output_footer {
   print "<!--/row-->\n";
   print "<hr>\n";
   print "<footer>\n";
-  print "<p class='pull-right text-align-right'>&copy; 2006-2012 by Pieter Wuille, Samuel Van Reeth, Pieter Maene &amp; Matthias Van der Hallen<br>Powered by $VERSION</p>\n";
+  print "<p class='pull-right text-align-right'>&copy; 2006-2013 by Pieter Wuille, Samuel Van Reeth, Pieter Maene &amp; Matthias Van der Hallen<br>Powered by $VERSION</p>\n";
   print " </footer>\n";
   print "</div>\n";
   print "<!--/.fluid-container-->\n";
