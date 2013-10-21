@@ -1306,6 +1306,12 @@ sub show_form_add_pay {
   print "</div>\n";
   print "</div>\n";
   print "</div>\n";
+  print "<div class='control-group'>\n";
+  print "<label class='control-label' for='inputItemDescription'>with description</label>\n";
+  print "<div class='controls'>\n";
+  print "<input type='text' id='inputItemDescription' name='ap_descr' placeholder='description'>\n";
+  print "</div>\n";
+  print "</div>\n";
   if ($auth_isadmin) {
     print "<div class='control-group'>\n";
     print "<label class='control-label' for='ap_beheer'>Beheer</label>\n";
@@ -2092,7 +2098,7 @@ if ($command eq 'addpay' && defined $auth_username) { while(1) {
   my ($tid) = $sth->fetchrow_array;
   $dbh->begin_work;
   $sth=$dbh->prepare("INSERT INTO ${prefix}TR (tid,author,afu,typ, descr) values (?,?,?,'i',?)");
-  $sth->execute($tid,$u2,$u1,param('ap_descr'));
+  $sth->execute($tid,$u2,$u1,(defined param('ap_descr'))? param('ap_descr'):'');
   $sth=$dbh->prepare("INSERT INTO ${prefix}ITEM (tid,amount) values (?,?)");
   $sth->execute($tid,-$val);
   calculate_effects($tid,1);
