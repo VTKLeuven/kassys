@@ -1277,6 +1277,8 @@ sub xmlwrap {
   return (HTML::Entities::encode_entities_numeric($v,"\000\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037\"'<>&"));
 }
 
+
+
 # some forms
 sub show_form_add_pay {
   return if (!$auth_active);
@@ -2630,6 +2632,10 @@ while(1) {
       next;
     }
     output_header;
+    
+    my $pfname=$USERS{$wanter}->{NAME};
+    my $ptname=$USERS{$wantedu}->{NAME};
+       
     print "<form class='form-horizontal form-horizontal-condensed' name='doew' action='".selfurl."' method='post'>\n";
     print "<input type='hidden' name='ew_id' value='$tid'>\n";
     print "<fieldset>\n";
@@ -2643,15 +2649,31 @@ while(1) {
     }
     print "<form name='doew' action='".selfurl."' method='post'>\n";
     print "<input type='hidden' name='ew_id' value='$tid'>\n";
-    print "<table>\n";
-    print "<tr class='tblodd'><td>When:</td><td>".substr($wwhen,0,16)."</td></tr>\n";
-    print "<tr class='tbleven'><td>Paid by:</td><td> ".htmlwrap($USERS{$wanter}->{NAME})."</td></tr>\n";
-    print "<tr class='tblodd'><td>Paid for:</td><td> <a href='".genurl('group',$wantedg)."'>".htmlwrap($GROUPS{$wantedg}->{DNAME})."</a></td></tr>\n" if (defined $wantedg);
-    print "<tr class='tblodd'><td>Paid for:</td><td> ".htmlwrap($USERS{$wantedu}->{NAME})."</a></td></tr>\n" if (defined $wantedu);
+    print "<div class='control-group'>\n";
+    print "<label class='control-label'>When</label>\n";
+    print "<div class='controls'>\n";
+    print "<span class='input uneditable-input'>".substr($wwhen,0,16)."</span>\n";
+    print "</div>\n";
+    print "</div>\n";
+    print "<div class='control-group'>\n";
+    print "<label class='control-label'>From</label>\n";
+    print "<div class='controls'>\n";
+    print "<span class='input uneditable-input'>".htmlwrap($pfname)."</span>\n";
+    print "</div>\n";
+    print "</div>\n";
+    print "<div class='control-group'>\n";
+    print "<label class='control-label'>To</label>\n";
+    print "<div class='controls'>\n";
+    print "<span class='input uneditable-input'>".htmlwrap($ptname)."</span>\n";
+    print "</div>\n";
+    print "</div>\n";
+    print "<div class='control-group'>\n";
+    print "<label class='control-label'>item</label>\n";
+    print "<div class='controls'>\n";
     if ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer)) {
-      print "<input type='text' name='ew_name' value='".htmlwrap($name)."'>\n";
+      print "<input type='text' name='ew_name' value='".htmlwrap($name || 'nameless item')."'>\n";
     } else {
-      print "<span class='input uneditable-input'>".htmlwrap($name)."</span>\n";
+      print "<span class='input uneditable-input'>".htmlwrap($name || 'nameless item')."</span>\n";
     }
     print "</div>\n";
     print "</div>\n";
