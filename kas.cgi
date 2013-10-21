@@ -836,6 +836,31 @@ sub calculate_active {
   return 1;
 }
 
+sub show_denies {
+  my ($tid) = @_;
+  my @denieslist = find_denies($tid);
+  my $length = @denieslist;
+  my $denies = join('&#13;&#10;', @denieslist);
+  print "<div class='control-group'>\n";
+  print "<label class='control-label'>Denies</label>\n";
+  print "<div class='controls'>\n";
+  print "<textarea rows='$length' cols='60' name='ew_denies' readonly>".$denies."</textarea>\n";
+  print "</div>\n";
+  print "</div>\n";
+}
+
+sub find_denies {
+  my ($tid) = @_;
+  $dbh->begin_work;
+  my $sth=$dbh->prepare("SELECT U.FULLNAME from ${prefix}EF E, ${prefix}USERS U WHERE E.TID=? AND E.UID=U.UID AND E.ACCEPT=FALSE");
+  $sth->execute($tid);
+  my @denies;
+  while(my ($fullname) = $sth->fetchrow_array){
+     push @denies, $fullname;
+  }
+  return @denies;
+}
+
 sub change_accept {
   my ($uid,$am,$x,$tid,$euid) = @_;
   return if (!$auth_active);
@@ -2533,9 +2558,9 @@ while(1) {
     output_footer;
   } elsif ($menu eq 'payment' && defined $auth_username) {
     my $tid=$path[1];
-    my $sth=$dbh->prepare("SELECT T.AFU,T.AUTHOR,T.WWHEN,I.AMOUNT FROM ${prefix}TR T, ${prefix}ITEM I WHERE T.TID=? AND I.TID=? AND T.NAME IS NULL");
+    my $sth=$dbh->prepare("SELECT T.AFU,T.AUTHOR,T.WWHEN,I.AMOUNT,T.ACTIVE FROM ${prefix}TR T, ${prefix}ITEM I WHERE T.TID=? AND I.TID=? AND T.NAME IS NULL");
     $sth->execute($tid,$tid);
-    my ($pfrom,$pto,$wwhen,$amount) = $sth->fetchrow_array;
+    my ($pfrom,$pto,$wwhen,$amount,$active) = $sth->fetchrow_array;
     if (!defined $pfrom) {
       push @msg,['error',"Payment does not exist"];
       @path=();
@@ -2581,6 +2606,9 @@ while(1) {
     print "<span class='input uneditable-input'>".htmlwrap($ptname)."</span>\n";
     print "</div>\n";
     print "</div>\n";
+    if (!$active && ($pto eq $auth_uid || $pto eq $beheer)){
+      show_denies($tid);
+    }
     if ($pto eq $auth_uid || $pto eq $beheer) {
       print "<div class='control-group'>\n";
       print "<label class='control-label' for='inputItemPrice'>Amount</label>\n";
@@ -2617,9 +2645,9 @@ while(1) {
     last;
   } elsif ($menu eq 'item' && defined $auth_username) {
     my $tid=$path[1];
-    my $sth=$dbh->prepare("SELECT T.AUTHOR,T.AFG,T.AFU,I.AMOUNT,T.WWHEN,T.NAME,T.DESCR FROM ${prefix}TR T, ${prefix}ITEM I WHERE T.TID=? AND I.TID=?");
+    my $sth=$dbh->prepare("SELECT T.AUTHOR,T.AFG,T.AFU,I.AMOUNT,T.WWHEN,T.NAME,T.DESCR,T.ACTIVE FROM ${prefix}TR T, ${prefix}ITEM I WHERE T.TID=? AND I.TID=?");
     $sth->execute($tid,$tid);
-    my ($wanter,$wantedg,$wantedu,$amount,$wwhen,$name,$descr)=$sth->fetchrow_array;
+    my ($wanter,$wantedg,$wantedu,$amount,$wwhen,$name,$descr,$active)=$sth->fetchrow_array;
     if (!defined $wanter) {
       push @msg,['error',"Item does not exist"];
       @path=();
@@ -2637,8 +2665,8 @@ while(1) {
       @path=();
       next;
     }
-    output_header;
-    
+    output_header;    
+
     my $pfname=$USERS{$wanter}->{NAME};
     my $ptname=$USERS{$wantedu}->{NAME};
        
@@ -2706,6 +2734,9 @@ while(1) {
     print "</div>\n";
     print "</div>\n";
     print "</div>\n";
+    if (!$active && ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer))){
+      show_denies($tid);
+    }
     if ($wanter eq $auth_uid || ($auth_isadmin && $wanter==$beheer)) {
       print "<div class='control-group'>\n";
       print "<input type='hidden' name='cmd' value='doew'>\n";
@@ -2879,9 +2910,9 @@ while(1) {
     last;
   } elsif ($menu eq 'bill' && defined $auth_username) {
     my $tid=$path[1];
-    my $sth=$dbh->prepare("SELECT T.AUTHOR,B.DEFINITION,T.NAME,T.DESCR,T.WWHEN FROM ${prefix}TR T, ${prefix}BILL B WHERE T.TID=? AND B.TID=?");
+    my $sth=$dbh->prepare("SELECT T.AUTHOR,B.DEFINITION,T.NAME,T.DESCR,T.WWHEN,T.ACTIVE FROM ${prefix}TR T, ${prefix}BILL B WHERE T.TID=? AND B.TID=?");
     $sth->execute($tid,$tid);
-    my ($definer,$definition,$name,$descr,$wwhen)=$sth->fetchrow_array;
+    my ($definer,$definition,$name,$descr,$wwhen,$active)=$sth->fetchrow_array;
     if (!defined $definer) {
       push @msg,['error',"Bill does not exist"];
       @path=();
@@ -2996,6 +3027,9 @@ while(1) {
     print "</ul>\n";
     print "</div>\n";
     print "</div>\n";
+    if (!$active && $isdefiner){
+      show_denies($tid);
+    }
     if ($isdefiner) {
       print "<div class='control-group'>\n";
       print "<input type='hidden' name='cmd' value='doeb'>\n";
