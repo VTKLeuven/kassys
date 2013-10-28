@@ -1445,9 +1445,9 @@ sub show_form_add_item {
   print "</div>\n";
   if ($auth_isadmin) {
     print "<div class='control-group'>\n";
-    print "<label class='control-label' for='ap_beheer'>Beheer</label>\n";
+    print "<label class='control-label' for='ai_beheer'>Beheer</label>\n";
     print "<div class='controls'>\n";
-    print "<input type='checkbox' name='ap_beheer' value='1'>\n";
+    print "<input type='checkbox' name='ai_beheer' value='1'>\n";
     print "</div>\n";
     print "</div>\n";
   }
