@@ -1436,7 +1436,7 @@ sub show_form_add_item {
   print "<div class='control-group'>\n";
   print "<label class='control-label' for='inputItemForGroup'>for existing group <input type='radio' name='aw_gtype' value='old'></label>\n";
   print "<div class='controls'>\n";
-  print "<select id='inputItemForGroup'>\n";
+  print "<select name='aw_group' id='inputItemForGroup'>\n";
   for (sort {$GROUPS{$b}->{WWHEN} cmp $GROUPS{$a}->{WWHEN}} (keys %GROUPS)) {
     if ($GROUPS{$_}->{PUBLIC}) { print "<option value='$GROUPS{$_}->{GID}'>".htmlwrap($GROUPS{$_}->{DNAME})."</option>\n" };
   }
