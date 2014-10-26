@@ -1292,7 +1292,7 @@ sub get_color {
 
 sub htmlwrap {
   my ($v,$textarea)=@_;
-  $v=encode_entities(decode('utf8',$v));
+  $v=encode_entities(decode('utf8',($v || '')));
   $v =~ s/[\n]/<br\/>/gm if (!defined $textarea);
   return $v;
 }
@@ -1436,7 +1436,7 @@ sub show_form_add_item {
   print "<div class='control-group'>\n";
   print "<label class='control-label' for='inputItemForGroup'>for existing group <input type='radio' name='aw_gtype' value='old'></label>\n";
   print "<div class='controls'>\n";
-  print "<select id='inputItemForGroup'>\n";
+  print "<select name='aw_group' id='inputItemForGroup'>\n";
   for (sort {$GROUPS{$b}->{WWHEN} cmp $GROUPS{$a}->{WWHEN}} (keys %GROUPS)) {
     if ($GROUPS{$_}->{PUBLIC}) { print "<option value='$GROUPS{$_}->{GID}'>".htmlwrap($GROUPS{$_}->{DNAME})."</option>\n" };
   }
@@ -1732,7 +1732,7 @@ sub show_history_line {
   print "<input type='hidden' name='hlv_$tid' value='".($showch ? $amount : $seen)."' >";
   print "<input type='hidden' name='hlo_$tid' value='".((!defined $accept || ($showch && $changed)) ? "-1" : ($raccept ? "0" : "1"))."' >";
   print "<input type='hidden' name='hla_$tid' value='$author'/>";#Matthias
-  print "<input type='hidden' name='hlaf_$tid' value='$affectuid'/>";#Matthias
+  print "<input type='hidden' name='hlaf_$tid' value='".($affectuid || '')."'/>";#Matthias
   print "<input type='hidden' name='hleuid_$tid' value='$euid'/>";#Matthias
   print "</td>";
   if ($showch) {
@@ -2102,7 +2102,7 @@ if ($command eq 'dohl' && defined $auth_username) {
   }
 }
 if ($command eq 'addpay' && defined $auth_username) { while(1) {
-  my $asbeheer = (param('ap_beheer') eq '1' && $auth_isadmin)? 1:0;
+  my $asbeheer = ((param('ap_beheer') || '0') eq '1' && $auth_isadmin)? 1:0;
   my $c_value = calc(param('ap_value'));
   if (!defined $c_value || $c_value<=0) {
     push @msg,["error","Invalid amount for payment: ".htmlwrap(param('ap_value') || "")];
@@ -2134,7 +2134,7 @@ if ($command eq 'addpay' && defined $auth_username) { while(1) {
   last;
 } }
 if ($command eq 'addwant' && defined $auth_username) { while(1) {
-  my $asbeheer = (param('ai_beheer') eq '1' && $auth_isadmin)? 1:0;
+  my $asbeheer = ((param('ai_beheer') || '0') eq '1' && $auth_isadmin)? 1:0;
   my $gid;
   my $uid;
   my $c_value=calc(param('aw_value'));
@@ -2183,7 +2183,7 @@ if ($command eq 'addwant' && defined $auth_username) { while(1) {
   last;
 } }
 if ($command eq 'addbill' && defined $auth_username) { while(1) {
-  my $asbeheer = (param('ab_beheer') eq '1' && $auth_isadmin)? 1:0;
+  my $asbeheer = ((param('ab_beheer') || '0') eq '1' && $auth_isadmin)? 1:0;
   my $sth=$dbh->prepare("SELECT nextval('${prefix}NTR')");
   $sth->execute;
   my ($tid)=$sth->fetchrow_array;
@@ -2665,11 +2665,11 @@ while(1) {
       @path=();
       next;
     }
-    output_header;    
+    output_header;
 
     my $pfname=$USERS{$wanter}->{NAME};
     my $ptname=$USERS{$wantedu}->{NAME};
-       
+
     print "<form class='form-horizontal form-horizontal-condensed' name='doew' action='".selfurl."' method='post'>\n";
     print "<input type='hidden' name='ew_id' value='$tid'>\n";
     print "<fieldset>\n";
